@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Meu Financeiro</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f766e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Financeiro">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  html,body{margin:0;height:100%;background:#f6f7f9}
+  @media (prefers-color-scheme:dark){html,body{background:#111418}}
+  iframe{position:fixed;inset:0;width:100%;height:100%;border:0}
+</style>
+</head>
+<body>
+<!-- COLE AQUI o link da sua implantação do Apps Script (termina em /exec) -->
+<iframe id="app" src="https://script.google.com/macros/s/AKfycbyV6BkMn-IgIP72Xrvn0q8rPTq5tqM9NOOzCB5QaGrjb6pfKJvkgRUqUYJ_RdIoDkwNyw/exec" allow="clipboard-write; fullscreen" title="Meu Financeiro"></iframe>
+<script>
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
+</script>
+</body>
+</html>
