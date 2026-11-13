@@ -448,6 +448,11 @@
       </div></div>
     <div class="card"><h3 style="margin-top:0">Categorias</h3><div id="cfg-cats"></div>
       <div class="filters" style="margin-top:12px"><input id="g-nome" placeholder="Nova categoria"><select id="g-tipo"><option>Normal</option><option>Neutra</option></select><button class="btn pri" id="g-add">Salvar categoria</button></div></div>
+      <div class="card"><h3 style="margin-top:0">Dispositivos conectados</h3>
+  <p class="mut" style="margin-top:0;font-size:13px">Aparelhos com "Lembrar neste dispositivo". Ao desconectar um, ele perde o acesso na próxima vez que falar com o servidor. Se ele tiver alterações feitas sem conexão, elas ficam guardadas nele e são enviadas quando entrar de novo com a senha.</p>
+  <div id="disp-lista"></div>
+  <div class="filters" style="margin-top:12px"><button class="btn" id="disp-atualizar">Atualizar</button><button class="btn" id="disp-outros" style="color:var(--neg)">Desconectar todos os outros</button></div>
+</div>
   </section>
 </main>
 
@@ -575,7 +580,11 @@ function run(fn, args, depois) {
     var m = (e && e.message) || String(e);
     if (m.indexOf('SESSAO_EXPIRADA') < 0) { if (ehErroRede(e)) entrarOffline(); throw e; }
     if (!depois && lsGet(DISP_KEY)) return renovarSessao().then(function () { return run(fn, args, true); },
-      function (e2) { if (ehErroRede(e2)) { entrarOffline(); return Promise.reject(e2); } return expirou(m); });
+      function (e2) {
+        if (ehErroRede(e2)) { entrarOffline(); return Promise.reject(e2); }
+        if (/SESSAO_EXPIRADA/.test(String((e2 && e2.message) || e2))) return revogado();
+        return expirou(m);
+      });
     return expirou(m);
   });
 }
@@ -615,10 +624,7 @@ function tentarReconectar() {
   (disp ? renovarSessao() : (S.token ? chamar('api', [S.token, 'ping', []], 20000) : Promise.reject(new Error('SESSAO_EXPIRADA'))))
     .then(function () { S.offline = false; marcarOk(); selo(); retomar(); })
     .catch(function (e) {
-      if (/SESSAO_EXPIRADA/.test(String((e && e.message) || e))) {
-        S.offline = false; S.token = ''; lsDel(DISP_KEY); try { sessionStorage.removeItem('tk'); } catch (x) {}
-        selo(); mostrarLogin('Entre novamente para sincronizar suas alterações guardadas.');
-      }
+            if (/SESSAO_EXPIRADA/.test(String((e && e.message) || e))) dispositivoNaoAutorizado();
     })
     .then(function () { S.reconectando = false; });
 }
@@ -638,11 +644,26 @@ function iniciar() {
   if (!lsGet(DISP_KEY)) { mostrarLogin(''); return; }
   if (navigator.onLine === false) { abrirOffline(); return; }
   renovarSessao().then(abrirApp).catch(function (e) {
-    if (/SESSAO_EXPIRADA/.test(String((e && e.message) || e))) { lsDel(DISP_KEY); mostrarLogin('Este dispositivo não está mais autorizado. Entre com a senha.'); }
+    if (/SESSAO_EXPIRADA/.test(String((e && e.message) || e))) dispositivoNaoAutorizado();
     else abrirOffline();
   });
 }
-
+function dispositivoNaoAutorizado() { // o servidor não reconhece mais este dispositivo: sai, apaga os dados do cache, MANTÉM a fila
+  var n = contarPend();
+  S.offline = false; clearInterval(tOff); S.enviando = false; S.token = '';
+  lsDel(DISP_KEY); lsDel(OK_KEY);
+  try { sessionStorage.removeItem('tk'); } catch (e) {}
+  S.todos = []; S.anexos = {}; S.ver++; S.undo = null; atualizarDesfazer();
+  cacheLimpar(); selo();
+  mostrarLogin('Este dispositivo foi desconectado.' + (S.fila.length ? ' Suas ' + n + ' alteração(ões) feitas sem conexão continuam guardadas e serão enviadas quando você entrar de novo.' : ' Entre com a senha para continuar.'));
+}
+function revogado() { dispositivoNaoAutorizado(); var x = new Error('SESSAO_EXPIRADA'); x.expirada = true; return Promise.reject(x); }
+function nomeDispositivo() {
+  var ua = navigator.userAgent || '';
+  var nav = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\/|CriOS/.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'Navegador';
+  var so = /iPhone/.test(ua) ? 'iPhone' : /iPad/.test(ua) ? 'iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : '';
+  return nav + (so ? ' no ' + so : '');
+}
 /* ---------- login ---------- */
 S.token = '';
 function mostrarLogin(msg) {
@@ -657,12 +678,12 @@ function sairLocal(msg) {
 }
 function entrar() {
   var b = $('l-ok'); b.disabled = true;
-  chamar('entrar', [$('l-senha').value, $('l-lembrar').checked]).then(function (r) {
+  chamar('entrar', [$('l-senha').value, $('l-lembrar').checked, nomeDispositivo()]).then(function (r) {
     S.token = r.token; S.offline = false; clearInterval(tOff); marcarOk();
     try { sessionStorage.setItem('tk', S.token); } catch (e) {}
     if (r.dispositivo) lsSet(DISP_KEY, r.dispositivo);
     $('l-senha').value = ''; $('login').classList.add('hide'); b.disabled = false;
-    if (S.fila.length) { selo(); if (!S.todos.length) boot(false); else renderAtual(); processarFila(); } else boot(false);
+    if (S.fila.length) { selo(); if (!S.todos.length) boot(false); else { S.recarregarDepois = true; renderAtual(); } processarFila(); } else boot(false);
   }).catch(function (e) {
     $('l-msg').textContent = ehErroRede(e) ? 'Sem conexão. Para entrar é preciso estar online.' : ((e && e.message) || 'Erro ao entrar.');
     $('l-msg').classList.remove('hide'); b.disabled = false; $('l-senha').select();
@@ -685,6 +706,7 @@ $('sair').onclick = function () {
 function irPara(t) {
   [].forEach.call($('nav').children, function (b) { b.classList.toggle('on', b.dataset.t === t); });
   ['resumo', 'lanc', 'rel', 'car', 'tet', 'rp', 'imp', 'cfg'].forEach(function (x) { $('t-' + x).classList.toggle('hide', x !== t); });
+  if (t === 'cfg') carregarDispositivos();
   if (t === 'rp') carregarRelat();
   if (t === 'tet') carregarTetos();
   if (t === 'rel') carregarRelatorio();
@@ -768,6 +790,7 @@ function cacheGravar(b) {
     localStorage.setItem(CACHE_KEY, s);
   } catch (e) { try { localStorage.removeItem(CACHE_KEY); } catch (x) {} }
 }
+function cacheLimpar() { try { localStorage.removeItem(CACHE_KEY); } catch (e) {} }
 var tCs;
 function cacheSnapshotSoon() { clearTimeout(tCs); tCs = setTimeout(cacheSnapshot, 400); }
 function cacheSnapshot() {
@@ -2801,7 +2824,39 @@ $('tb').addEventListener('click', function (e) { // clique no 📎 da lista
 $('f-anexo').onchange = carregarLanc;
 $('f-limpar').addEventListener('click', function () { $('f-anexo').checked = false; carregarLanc(); });
 try { window.addEventListener('beforeunload', function (e) { if (S.filaSemSalvar) { e.preventDefault(); e.returnValue = ''; } }); } catch (e) {}
-
+/* ---------- dispositivos lembrados ---------- */
+function fdh(ms) { return ms ? new Date(ms).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'; }
+function carregarDispositivos() {
+  var box = $('disp-lista');
+  if (S.offline) { box.innerHTML = '<span class="mut">Sem conexão: a lista só carrega online.</span>'; return; }
+  if (!S.token) return;
+  box.innerHTML = '<span class="mut">Carregando…</span>';
+  run('listarDispositivos', [lsGet(DISP_KEY) || '']).then(function (l) {
+    S.disp = l || [];
+    box.innerHTML = S.disp.length ? S.disp.map(function (d, i) {
+      return '<div class="bar" style="flex-wrap:wrap"><span style="flex:1;min-width:200px"><b>' + esc(d.nome) + '</b>' + (d.atual ? ' <span class="tag">este dispositivo</span>' : '') +
+        '<br><small class="mut">Entrou em ' + fdh(d.criado) + ' · último uso ' + fdh(d.uso) + ' · vale até ' + fdh(d.exp) + '</small></span>' +
+        '<button class="btn disp-ren" data-i="' + i + '">Renomear</button>' +
+        (d.atual ? '' : '<button class="btn disp-del" data-i="' + i + '" style="color:var(--neg)">Desconectar</button>') + '</div>';
+    }).join('') : '<span class="mut">Nenhum dispositivo lembrado.</span>';
+  }).catch(function (e) { if (!e || !e.expirada) box.innerHTML = '<span class="neg">Erro: ' + esc((e && e.message) || e) + '</span>'; });
+}
+$('disp-lista').onclick = function (ev) {
+  var b = ev.target.closest('button'); if (!b) return;
+  var d = S.disp && S.disp[+b.dataset.i]; if (!d) return;
+  if (b.classList.contains('disp-del')) {
+    if (!confirm('Desconectar "' + d.nome + '"?\n\nEle perde o acesso na próxima sincronização. Alterações feitas lá sem conexão ficam guardadas nele até você entrar de novo.')) return;
+    run('desconectarDispositivo', [d.id]).then(carregarDispositivos).catch(function (e) { if (!e || !e.expirada) alert('Não foi possível desconectar: ' + ((e && e.message) || e)); });
+  } else if (b.classList.contains('disp-ren')) {
+    var nome = prompt('Nome do dispositivo:', d.nome); if (!nome || !nome.trim()) return;
+    run('renomearDispositivo', [d.id, nome]).then(carregarDispositivos).catch(function (e) { if (!e || !e.expirada) alert('Não foi possível renomear: ' + ((e && e.message) || e)); });
+  }
+};
+$('disp-atualizar').onclick = carregarDispositivos;
+$('disp-outros').onclick = function () {
+  if (!confirm('Desconectar todos os outros dispositivos?')) return;
+  run('desconectarOutros', [lsGet(DISP_KEY) || '']).then(carregarDispositivos).catch(function (e) { if (!e || !e.expirada) alert('Não foi possível desconectar: ' + ((e && e.message) || e)); });
+};
 </script>
 <script>
 /* Ajuste mobile: rolagem do menu inferior e aviso de erro do formulário. */
@@ -2832,7 +2887,6 @@ try { window.addEventListener('beforeunload', function (e) { if (S.filaSemSalvar
   } catch (err) { if (window.console) console.warn('ajuste-mobile:', err); }
 })();
 iniciar();
-if (S.token) { $('login').classList.add('hide'); boot(false); } else mostrarLogin('');
 </script>
 </body>
 </html>
