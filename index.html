@@ -40,6 +40,7 @@
   .hide{display:none !important}
   /* tela de carregamento: evita mostrar o login (ou o app vazio) enquanto o dispositivo salvo renova a sessão */
   body.carregando > *{visibility:hidden}
+  body.carregando > #lento{visibility:visible}
   body.carregando::before{content:"Carregando…";position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:var(--bg);color:var(--mut);font-size:16px}
   .login{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:16px;z-index:100}
   .login .box{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:24px;width:100%;max-width:340px}
@@ -245,6 +246,15 @@
 </style>
 </head>
 <body class="carregando">
+<div class="modal hide" id="lento" style="z-index:1001"><div class="box">
+  <h3 style="margin-top:0">A conexão está demorando</h3>
+  <p class="mut" id="lento-txt" style="margin-top:0"></p>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <button class="btn pri" id="lento-off">Usar o modo offline</button>
+    <button class="btn hide" id="lento-senha">Entrar com a senha</button>
+    <button class="btn" id="lento-esperar">Continuar aguardando</button>
+  </div>
+</div></div>
 <div class="login" id="login"><div class="box">
   <h2 style="margin-top:0">💰 Meu Financeiro</h2>
   <div class="f"><label>Senha</label><input type="password" id="l-senha" autocomplete="current-password"></div>
@@ -571,10 +581,10 @@ function erroOffline() { var e = new Error('Sem conexão: esta ação só funcio
 function marcarOk() { lsSet(OK_KEY, String(Date.now())); }
 function offlineOk() { return Date.now() - Number(lsGet(OK_KEY) || 0) < OFFLINE_DIAS * 864e5; }
 
-function renovarSessao() { // troca o dispositivo lembrado por uma sessão nova
+function renovarSessao(ms) { // troca o dispositivo lembrado por uma sessão nova
   var d = lsGet(DISP_KEY);
   if (!d) { var e = new Error('SEM_DISPOSITIVO'); e.semDisp = true; return Promise.reject(e); }
-  return chamar('renovar', [d]).then(function (r) { S.token = r.token; try { sessionStorage.setItem('tk', S.token); } catch (x) {} marcarOk(); return r; });
+  return chamar('renovar', [d], ms).then(function (r) { S.token = r.token; try { sessionStorage.setItem('tk', S.token); } catch (x) {} marcarOk(); return r; });
 }
 function expirou(m) { sairLocal('Sessão expirada. Entre novamente.'); var x = new Error(m); x.expirada = true; return Promise.reject(x); }
 function run(fn, args, depois) {
@@ -633,11 +643,32 @@ function tentarReconectar() {
 }
 window.addEventListener('online', function () { if (S.offline) tentarReconectar(); });
 window.addEventListener('offline', function () { if (S.todos.length) entrarOffline(); });
-
+/* --- partida lenta: depois de 1 min 30 oferece o modo offline --- */
+var LENTO_MS = 90000, tLento;
+function armarLento() {
+  clearTimeout(tLento);
+  tLento = setTimeout(function () {
+    if (!document.body.classList.contains('carregando')) return;
+    var pode = !!cacheLer() && offlineOk();
+    $('lento-txt').textContent = pode
+      ? 'A conexão está demorando mais que o normal. Trocar para o modo offline? Você usa os dados guardados neste aparelho e as alterações são enviadas quando a conexão voltar.'
+      : 'A conexão está demorando mais que o normal e não há dados guardados neste aparelho para o modo offline.';
+    $('lento-off').classList.toggle('hide', !pode); $('lento-senha').classList.toggle('hide', pode);
+    $('lento').classList.remove('hide');
+  }, LENTO_MS);
+}
+$('lento-esperar').onclick = function () { $('lento').classList.add('hide'); };
+$('lento-off').onclick = function () { S.partidaCancelada = true; abrirOffline(); };
+$('lento-senha').onclick = function () { mostrarLogin(''); };
+function partidaPronta() { // a sessão foi renovada
+  if (!S.partidaCancelada) { abrirApp(); return; }
+  S.offline = false; marcarOk(); selo(); retomar(); // já tinha trocado para offline: reconecta sozinho
+}
 /* --- partida --- */
 function abrirApp() { fimCarga(); $('login').classList.add('hide'); if (S.fila.length) processarFila(); boot(false); }
 function iniciar() {
-  setTimeout(function () { if (document.body.classList.contains('carregando')) { if (!S.token && !S.offline) mostrarLogin(''); else fimCarga(); } }, 25000); // segurança: nunca fica preso na tela de carregamento
+  armarLento();
+  setTimeout(function () { if (document.body.classList.contains('carregando')) { if (!S.token && !S.offline) mostrarLogin(''); else fimCarga(); } }, 180000); // segurança: nunca fica preso na tela de carregamento
   if (!temGAS()) { // cópia hospedada: instala como app
     var lk = document.createElement('link'); lk.rel = 'manifest'; lk.href = 'manifest.webmanifest'; document.head.appendChild(lk);
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function () {});
@@ -647,9 +678,9 @@ function iniciar() {
   if (sess) { S.token = sess; abrirApp(); return; }
   if (!lsGet(DISP_KEY)) { mostrarLogin(''); return; }
   if (navigator.onLine === false) { abrirOffline(); return; }
-  renovarSessao().then(abrirApp).catch(function (e) {
+  renovarSessao(150000).then(partidaPronta).catch(function (e) {
     if (/SESSAO_EXPIRADA/.test(String((e && e.message) || e))) dispositivoNaoAutorizado();
-    else abrirOffline();
+    else if (!S.partidaCancelada) abrirOffline();
   });
 }
 function dispositivoNaoAutorizado() { // o servidor não reconhece mais este dispositivo: sai, apaga os dados do cache, MANTÉM a fila
@@ -670,7 +701,7 @@ function nomeDispositivo() {
 }
 /* ---------- login ---------- */
 S.token = '';
-function fimCarga() { document.body.classList.remove('carregando'); }
+function fimCarga() { document.body.classList.remove('carregando'); clearTimeout(tLento); $('lento').classList.add('hide'); }
 function mostrarLogin(msg) {
   fimCarga();
   $('login').classList.remove('hide');
