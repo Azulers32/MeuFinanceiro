@@ -574,7 +574,7 @@ var brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })
 function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 function fdata(iso) { var p = iso.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
 /* ---------- transporte + modo offline ---------- */
-var API_URL = ''; // SÓ na cópia hospedada: cole aqui a URL /exec da implantação
+var API_URL = 'https://script.google.com/macros/s/AKfycbyV6BkMn-IgIP72Xrvn0q8rPTq5tqM9NOOzCB5QaGrjb6pfKJvkgRUqUYJ_RdIoDkwNyw/exec'; // SÓ na cópia hospedada: cole aqui a URL /exec da implantação
 var OFFLINE_DIAS = 3, DISP_KEY = 'fin_disp', OK_KEY = 'fin_ok', FILA_KEY = 'fin_fila_v1', tOff;
 function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
 function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
