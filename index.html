@@ -51,17 +51,6 @@
   .drop{border:2px dashed var(--bd);border-radius:12px;padding:28px;text-align:center;color:var(--mut)}
   .tag{font-size:12px;background:var(--bd);border-radius:6px;padding:2px 6px}
   .msg{padding:10px 12px;border-radius:8px;background:var(--bg);border:1px solid var(--bd);margin-top:12px}
-  /* assistente (Gemini) */
-  .ia-chat{max-height:58vh;overflow:auto;display:flex;flex-direction:column;gap:10px;margin:12px 0}
-  .ia-chat:empty{display:none}
-  .ia-u{align-self:flex-end;background:var(--pri);color:#fff;padding:8px 12px;border-radius:12px 12px 2px 12px;max-width:85%;white-space:pre-wrap;overflow-wrap:anywhere}
-  .ia-m{align-self:flex-start;background:var(--bg);border:1px solid var(--bd);padding:6px 12px;border-radius:12px 12px 12px 2px;max-width:96%;overflow-wrap:anywhere}
-  .ia-m p{margin:6px 0}.ia-m ul{margin:6px 0;padding-left:20px}
-  .ia-box{border:1px solid var(--bd);border-radius:10px;padding:8px 10px;margin:8px 0;background:var(--card)}
-  .ia-it{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--bd)}
-  .ia-it input[type=checkbox]{margin-top:3px;flex:none}
-  .ia-it select{max-width:100%;font-size:13px;padding:4px 6px;margin:4px 4px 0 0}
-  .ia-in textarea{flex:1;font:inherit;padding:8px 10px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx);resize:vertical;min-width:0}
 </style>
 <style id="ajuste-mobile">
 @media (hover:none){tr.row:hover{background:none}}
@@ -106,7 +95,6 @@
   nav button[data-t=tet]::before{content:"🎯"}
   nav button[data-t=rp]::before{content:"📈"}
   nav button[data-t=imp]::before{content:"📥"}
-  nav button[data-t=ia]::before{content:"✨"}
   nav button[data-t=cfg]::before{content:"⚙️"}
 
   /* ---------- indicadores e barras ---------- */
@@ -274,7 +262,6 @@
     <button data-t="tet">Tetos</button>
     <button data-t="rp">Relatórios</button>
     <button data-t="imp">Importar</button>
-    <button data-t="ia">Assistente</button>
     <button data-t="cfg">Configurar</button>
   </nav>
   <span style="margin-left:auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
@@ -441,23 +428,6 @@
   </section>
 
   <!-- CONFIG -->
-  <!-- ASSISTENTE (Gemini) -->
-  <section id="t-ia" class="hide">
-    <div class="card">
-      <h3 style="margin-top:0">✨ Assistente (Gemini)</h3>
-      <p class="mut" style="margin-top:0;font-size:13px">Analisa seus dados e dá sugestões. Se você pedir, <b>propõe</b> lançamentos e tetos: nada é gravado sem você marcar e confirmar.
-        A cada pergunta, um resumo dos seus dados é enviado ao Gemini.</p>
-      <div class="msg warn hide" id="ia-off">O Gemini ainda não foi configurado. No menu da planilha: <b>Financeiro › Configurar Gemini (chave)</b>.</div>
-      <div class="filters" id="ia-sug" style="margin-top:12px"></div>
-      <div class="ia-chat" id="ia-chat"></div>
-      <div class="ia-in" style="display:flex;gap:8px;align-items:flex-end;margin-top:8px">
-        <textarea id="ia-txt" rows="2" placeholder="Pergunte algo ou peça para lançar. Ex.: lance R$ 45 de almoço hoje no Nubank"></textarea>
-        <button class="btn pri" id="ia-enviar">Enviar</button>
-      </div>
-      <div style="margin-top:8px"><button class="btn" id="ia-novo">Nova conversa</button> <span class="mut" style="font-size:12px">Ctrl+Enter envia. A conversa some ao sair ou recarregar.</span></div>
-    </div>
-  </section>
-
   <section id="t-cfg" class="hide">
     <div class="card"><h3 style="margin-top:0">Contas e cartões</h3>
       <p class="mut" style="margin-top:0;font-size:13px">Clique em uma conta para editar.</p>
@@ -609,9 +579,9 @@ function renovarSessao() { // troca o dispositivo lembrado por uma sessão nova
 function expirou(m) { sairLocal('Sessão expirada. Entre novamente.'); var x = new Error(m); x.expirada = true; return Promise.reject(x); }
 function run(fn, args, depois) {
   if (S.offline) return Promise.reject(erroOffline());
-  return chamar('api', [S.token, fn, args || []], fn === 'anexarArquivo' ? 180000 : fn === 'assistente' ? 130000 : 60000).catch(function (e) {
+  return chamar('api', [S.token, fn, args || []], fn === 'anexarArquivo' ? 180000 : 60000).catch(function (e) {
     var m = (e && e.message) || String(e);
-    if (m.indexOf('SESSAO_EXPIRADA') < 0) { if (ehErroRede(e) && !(fn === 'assistente' && /tempo_esgotado/i.test(m))) entrarOffline(); throw e; } // demora do Gemini não é falta de rede
+    if (m.indexOf('SESSAO_EXPIRADA') < 0) { if (ehErroRede(e)) entrarOffline(); throw e; }
     if (!depois && lsGet(DISP_KEY)) return renovarSessao().then(function () { return run(fn, args, true); },
       function (e2) {
         if (ehErroRede(e2)) { entrarOffline(); return Promise.reject(e2); }
@@ -709,7 +679,6 @@ function mostrarLogin(msg) {
 }
 function sairLocal(msg) {
   S.token = '';
-  try { iaReset(); } catch (e) {} // a conversa com o assistente não fica no aparelho
   try { sessionStorage.removeItem('tk'); localStorage.removeItem('fin_disp'); } catch (e) {}
   mostrarLogin(msg);
 }
@@ -742,8 +711,7 @@ $('sair').onclick = function () {
 /* ---------- navegação ---------- */
 function irPara(t) {
   [].forEach.call($('nav').children, function (b) { b.classList.toggle('on', b.dataset.t === t); });
-  ['resumo', 'lanc', 'rel', 'car', 'tet', 'rp', 'imp', 'ia', 'cfg'].forEach(function (x) { $('t-' + x).classList.toggle('hide', x !== t); });
-  if (t === 'ia') iaAbrir();
+  ['resumo', 'lanc', 'rel', 'car', 'tet', 'rp', 'imp', 'cfg'].forEach(function (x) { $('t-' + x).classList.toggle('hide', x !== t); });
   if (t === 'cfg') carregarDispositivos();
   if (t === 'rp') carregarRelat();
   if (t === 'tet') carregarTetos();
@@ -2894,249 +2862,6 @@ $('disp-atualizar').onclick = carregarDispositivos;
 $('disp-outros').onclick = function () {
   if (!confirm('Desconectar todos os outros dispositivos?')) return;
   run('desconectarOutros', [lsGet(DISP_KEY) || '']).then(carregarDispositivos).catch(function (e) { if (!e || !e.expirada) alert('Não foi possível desconectar: ' + ((e && e.message) || e)); });
-};
-
-/* ======================================================================
- * ASSISTENTE (Gemini). A conversa fica só na memória (Sair apaga).
- * O Gemini apenas PROPÕE lançamentos/tetos; a gravação passa por transacao(),
- * igual a qualquer lançamento manual (fila, planilha e botão Desfazer).
- * ====================================================================== */
-S.ia = { msgs: [], ocupado: false, ativo: null, erro: '' };
-var iaTimer;
-var IA_SUG = [
-  ['Analisar meu mês', 'Analise meu mês atual: receitas, despesas, tetos e o que merece atenção. Termine com 3 sugestões práticas.'],
-  ['Onde economizar?', 'Olhando os últimos meses, em quais categorias posso economizar e quanto, de forma realista?'],
-  ['Contas a vencer', 'O que tenho para pagar e receber nos próximos dias? Meu saldo cobre?'],
-  ['Sugerir tetos', 'Sugira tetos de gasto para este mês com base no meu histórico e proponha defini-los.']
-];
-function iaReset() {
-  S.ia = { msgs: [], ocupado: false, ativo: S.ia ? S.ia.ativo : null, erro: '' };
-  if ($('ia-txt')) $('ia-txt').value = '';
-  iaRender(true);
-}
-function n2(v) { return (Math.round(v * 100) / 100).toFixed(2); }
-function iaLimpa(s, max) { return String(s == null ? '' : s).replace(/[\r\n|]+/g, ' ').trim().slice(0, max || 60); }
-
-/* Resumo dos dados enviado ao Gemini (calculado na memória, inclui o que ainda está na fila de gravação). */
-function iaContexto() {
-  var hoje = hojeISO(), mes = hoje.slice(0, 7), L = [];
-  var r = calcResumo(mes), cc = calcCartoes().cartoes;
-  L.push('HOJE: ' + hoje + ' (mês atual ' + mes + ')');
-  L.push('', 'CONTAS (saldo atual = só o já pago/recebido):');
-  r.saldos.forEach(function (s) { L.push('- ' + iaLimpa(s.conta) + ' | ' + s.tipo + ' | saldo ' + n2(s.saldo)); });
-  r.neutras.forEach(function (s) { L.push('- ' + iaLimpa(s.conta) + ' | conta neutra (fora dos gastos pessoais e do total) | saldo ' + n2(s.saldo)); });
-  cc.forEach(function (c) {
-    var p = c.proxima, abertas = (c.faturas || []).filter(function (f) { return f.status && f.status !== 'Paga'; }).slice(0, 4)
-      .map(function (f) { return rotuloFatura(f) + ' ' + f.status + ' restante ' + n2(f.restante); }).join('; ');
-    L.push('- ' + iaLimpa(c.nome) + ' | Cartão de crédito | fecha dia ' + c.fechamento + ', vence dia ' + c.vencimento + ', limite ' + n2(c.limite) +
-      (c.disponivel != null ? ', disponível ' + n2(c.disponivel) : '') + ', comprometido ' + n2(c.comprometido) + ', a pagar agora ' + n2(c.aPagar) +
-      (p ? ', próxima fatura ' + p.chave + ' (' + p.status + ', vence ' + p.vencimento + ', restante ' + n2(p.restante) + ')' : '') + (abertas ? ' | faturas: ' + abertas : ''));
-  });
-  L.push('Total nas contas (sem cartões e neutras): ' + n2(r.totalContas));
-  var nc = catNeutras(), normais = [], neutras = [];
-  S.categorias.forEach(function (c) { (nc[c.nome] ? neutras : normais).push(iaLimpa(c.nome)); });
-  L.push('', 'CATEGORIAS: ' + normais.join(', '));
-  L.push('CATEGORIAS NEUTRAS (não contam como receita/despesa): ' + neutras.join(', '));
-  L.push('', 'HISTÓRICO MENSAL (despesas pessoais; os 6 meses mais recentes trazem as categorias):');
-  for (var k = 0; k < 12; k++) {
-    var m = mesAtras(mes, k), x = calcResumo(m);
-    if (k >= 6 && !x.receitas && !x.despesas) continue;
-    L.push(m + (k === 0 ? ' (em andamento)' : '') + ' | receitas ' + n2(x.receitas) + ' | despesas ' + n2(x.despesas) + ' | resultado ' + n2(x.resultado) +
-      (k < 6 && x.categorias.length ? ' | ' + x.categorias.slice(0, 12).map(function (c) { return iaLimpa(c.nome || 'Sem categoria') + ' ' + n2(c.total); }).join('; ') : ''));
-  }
-  var t = calcTetos(mes).linhas.filter(function (x) { return x.teto > 0; });
-  L.push('', 'TETOS DE GASTO DE ' + mes + (t.length ? ':' : ': (nenhum definido)'));
-  t.forEach(function (x) { L.push('- ' + iaLimpa(x.cat) + ' | teto ' + n2(x.teto) + ' | gasto ' + n2(x.gasto) + ' | pendente ' + n2(x.pend) + ' | ' + x.status); });
-  var fmt = function (l) {
-    return l.data + ' | ' + iaLimpa(l.descricao, 50) + ' | ' + iaLimpa(l.categoria, 30) + ' | ' + n2(l.valor) + ' | ' + iaLimpa(l.conta, 30) +
-      (l.transfId ? ' | transferência' : '') + (l.parcela ? ' | parcela ' + iaLimpa(l.parcela, 10) : '');
-  };
-  var pend = S.todos.filter(function (l) { return l.situacao === 'Pendente'; }).sort(function (a, b) { return a.data < b.data ? -1 : 1; }).slice(0, 80);
-  L.push('', 'PENDENTES (a pagar/receber; data | descrição | categoria | valor | conta):');
-  pend.forEach(function (l) { L.push(fmt(l)); });
-  var corte = isoLocal(new Date(Date.now() - 90 * 864e5));
-  var rec = S.todos.filter(function (l) { return l.situacao !== 'Pendente' && l.data >= corte; }).slice(0, 350); // S.todos já vem do mais recente ao mais antigo
-  L.push('', 'LANÇAMENTOS PAGOS DOS ÚLTIMOS 90 DIAS (data | descrição | categoria | valor | conta):');
-  rec.forEach(function (l) { L.push(fmt(l)); });
-  return L.join('\n');
-}
-
-function iaNome(n, lista) {
-  n = String(n || '').trim(); if (!n) return '';
-  var a = lista.filter(function (x) { return x.nome === n; })[0] || lista.filter(function (x) { return norm(x.nome) === norm(n); })[0];
-  return a ? a.nome : '';
-}
-function iaPreparar(m, res) { // converte as propostas do servidor em itens editáveis, só com nomes que existem
-  var mes = mesDeHoje(), nc = catNeutras();
-  m.lanc = (res.lancamentos || []).map(function (x) {
-    var transf = x.tipo === 'transferencia';
-    return { tipo: x.tipo, data: x.data, descricao: x.descricao, valor: x.valor, situacao: x.situacao === 'Pendente' ? 'Pendente' : 'Pago', motivo: x.motivo || '',
-      conta: iaNome(x.conta, S.contas), contaDestino: transf ? iaNome(x.contaDestino, S.contas) : '', categoria: transf ? '' : iaNome(x.categoria, S.categorias), on: true };
-  });
-  m.tetos = (res.tetos || []).map(function (t) {
-    var c = iaNome(t.categoria, S.categorias.filter(function (x) { return !nc[x.nome]; }));
-    return c ? { mes: mes, categoria: c, valor: t.valor, on: true } : null;
-  }).filter(Boolean);
-}
-function iaTexto(t) { // texto do modelo: escapa tudo, só **negrito** e listas "- "
-  var out = [], lista = false;
-  String(t || '').split('\n').forEach(function (ln) {
-    var h = esc(ln).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>'), li = /^\s*[-*•]\s+(.*)$/.exec(h);
-    if (li) { if (!lista) { out.push('<ul>'); lista = true; } out.push('<li>' + li[1] + '</li>'); return; }
-    if (lista) { out.push('</ul>'); lista = false; }
-    if (h.trim()) out.push('<p>' + h + '</p>');
-  });
-  if (lista) out.push('</ul>');
-  return out.join('');
-}
-function iaSel(mi, g, i, k, valor, lista, vazio) {
-  return '<select data-m="' + mi + '" data-g="' + g + '" data-i="' + i + '" data-k="' + k + '">' + '<option value="">' + vazio + '</option>' +
-    lista.map(function (x) { return '<option value="' + escAttr(x) + '"' + (x === valor ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('') + '</select>';
-}
-function iaPropostas(m, mi) {
-  var h = '', nc = catNeutras(), contas = S.contas.map(function (c) { return c.nome; }), cats = S.categorias.filter(function (c) { return !nc[c.nome]; }).map(function (c) { return c.nome; });
-  if (m.lanc && m.lanc.length) {
-    var n = m.lanc.filter(function (x) { return x.on; }).length;
-    h += '<div class="ia-box"><b>Lançamentos propostos</b>';
-    m.lanc.forEach(function (x, j) {
-      var transf = x.tipo === 'transferencia', rec = x.tipo === 'receita', dis = m.apLanc ? ' disabled' : '';
-      var okData = /^\d{4}-\d{2}-\d{2}$/.test(x.data || '');
-      h += '<div class="ia-it"><input type="checkbox" data-m="' + mi + '" data-g="l" data-i="' + j + '" data-k="on"' + (x.on ? ' checked' : '') + dis + '>' +
-        '<div style="flex:1;min-width:0"><div><b>' + esc(x.descricao) + '</b> <span class="' + (transf ? 'mut' : rec ? 'pos' : 'neg') + '">' + brl.format(transf || rec ? x.valor : -x.valor) + '</span></div>' +
-        '<div class="mut" style="font-size:13px">' + (transf ? 'Transferência' : rec ? 'Receita' : 'Despesa') + ' · ' + (okData ? fdata(x.data) : 'data inválida') + ' · ' + x.situacao + '</div>' +
-        '<div' + (dis ? ' style="pointer-events:none;opacity:.7"' : '') + '>' + iaSel(mi, 'l', j, 'conta', x.conta, contas, transf ? 'De qual conta?' : 'Qual conta?') +
-        (transf ? iaSel(mi, 'l', j, 'contaDestino', x.contaDestino, contas, 'Para qual conta?') : iaSel(mi, 'l', j, 'categoria', x.categoria, cats, '(sem categoria)')) + '</div>' +
-        (x.motivo ? '<div class="mut" style="font-size:12px;margin-top:2px">' + esc(x.motivo) + '</div>' : '') + '</div></div>';
-    });
-    h += m.apLanc ? '<div class="pos" style="margin-top:8px">✓ Adicionado. Eles têm a tag <b>IA</b>; use "Desfazer" logo após ou edite em Lançamentos.</div>'
-      : '<button class="btn pri" style="margin-top:8px" data-m="' + mi + '" data-ap="l"' + (n ? '' : ' disabled') + '>Adicionar ' + n + ' selecionado(s)</button>';
-    if (m.erroL) h += '<div class="neg" style="margin-top:6px;font-size:13px">' + esc(m.erroL) + '</div>';
-    h += '</div>';
-  }
-  if (m.tetos && m.tetos.length) {
-    var nt = m.tetos.filter(function (x) { return x.on; }).length;
-    h += '<div class="ia-box"><b>Tetos propostos para ' + fmes(m.tetos[0].mes) + '</b>';
-    m.tetos.forEach(function (t, j) {
-      var at = S.tetos.filter(function (x) { return x.mes === t.mes && x.categoria === t.categoria; })[0];
-      h += '<div class="ia-it"><input type="checkbox" data-m="' + mi + '" data-g="t" data-i="' + j + '" data-k="on"' + (t.on ? ' checked' : '') + (m.apTetos ? ' disabled' : '') + '>' +
-        '<div style="flex:1"><b>' + esc(t.categoria) + '</b> → ' + (t.valor > 0 ? brl.format(t.valor) : 'remover teto') + ' <span class="mut" style="font-size:13px">(atual: ' + (at ? brl.format(at.valor) : 'sem teto') + ')</span></div></div>';
-    });
-    h += m.apTetos ? '<div class="pos" style="margin-top:8px">✓ Tetos aplicados.</div>'
-      : '<button class="btn pri" style="margin-top:8px" data-m="' + mi + '" data-ap="t"' + (nt ? '' : ' disabled') + '>Aplicar ' + nt + ' teto(s)</button>';
-    h += '</div>';
-  }
-  return h;
-}
-function iaRender(rolar) {
-  var box = $('ia-chat'); if (!box) return;
-  var pos = box.scrollTop, h = '';
-  S.ia.msgs.forEach(function (m, i) {
-    h += m.r === 'u' ? '<div class="ia-u">' + esc(m.t) + '</div>'
-      : '<div class="ia-m">' + iaTexto(m.t) + iaPropostas(m, i) + (m.diag ? '<div class="mut" style="font-size:11px;margin:4px 0">' + esc(m.diag.modelo || '') + ' · ' + (m.diag.ms / 1000).toFixed(1).replace('.', ',') + ' s</div>' : '') + '</div>';
-  });
-  if (S.ia.ocupado) h += '<div class="ia-m mut">Pensando… <span id="ia-seg">' + Math.round((Date.now() - (S.ia.t0 || Date.now())) / 1000) + ' s</span> <button class="btn" data-cancel="1" style="margin-left:8px;padding:2px 10px;min-height:0">Cancelar</button></div>';
-  if (S.ia.erro) h += '<div class="msg neg" style="margin:0">' + esc(S.ia.erro) + '</div>';
-  box.innerHTML = h;
-  box.scrollTop = rolar ? box.scrollHeight : pos;
-  $('ia-enviar').disabled = S.ia.ocupado || S.ia.ativo === false;
-}
-function iaSugestoes() {
-  $('ia-sug').innerHTML = IA_SUG.map(function (s, i) { return '<button class="btn" data-q="' + i + '">' + esc(s[0]) + '</button>'; }).join('');
-}
-function iaAbrir() {
-  iaSugestoes(); iaRender(true);
-  $('ia-off').classList.toggle('hide', S.ia.ativo !== false);
-  if (S.ia.ativo === true || S.offline || !S.token) return;
-  run('assistenteStatus').then(function (r) {
-    S.ia.ativo = !!(r && r.ativo); $('ia-off').classList.toggle('hide', S.ia.ativo); iaRender();
-  }).catch(function () {});
-}
-function iaHistorico() { // texto que o Gemini vê de cada mensagem (inclui o que ele propôs e se já foi aplicado)
-  return S.ia.msgs.map(function (m) {
-    var t = m.t;
-    if (m.r === 'm' && m.lanc && m.lanc.length) t += '\n[Você propôs ' + m.lanc.length + ' lançamento(s): ' + m.lanc.map(function (x) { return x.tipo + ' ' + x.descricao + ' ' + x.valor + ' em ' + x.data + ' (' + x.conta + ')'; }).join('; ') + '. ' + (m.apLanc ? 'O usuário já adicionou os selecionados.' : 'Ainda não foram adicionados.') + ']';
-    if (m.r === 'm' && m.tetos && m.tetos.length) t += '\n[Você propôs tetos. ' + (m.apTetos ? 'Já aplicados.' : 'Ainda não aplicados.') + ']';
-    return { r: m.r, t: t };
-  });
-}
-function iaEnviar(txt) {
-  var ia = S.ia; txt = String(txt || '').trim();
-  if (!txt || ia.ocupado || ia.ativo === false) return;
-  ia.msgs.push({ r: 'u', t: txt.slice(0, 2000) }); ia.ocupado = true; ia.erro = ''; ia.t0 = Date.now(); $('ia-txt').value = ''; iaRender(true);
-  clearInterval(iaTimer);
-  iaTimer = setInterval(function () { var e = $('ia-seg'); if (e && S.ia === ia && ia.ocupado) e.textContent = Math.round((Date.now() - ia.t0) / 1000) + ' s'; else clearInterval(iaTimer); }, 1000);
-  var corpo;
-  try { corpo = { mensagens: iaHistorico(), contexto: iaContexto(), hoje: hojeISO() }; }
-  catch (e) { ia.ocupado = false; ia.erro = 'Não consegui montar o resumo dos dados: ' + ((e && e.message) || e); iaRender(true); return; }
-  run('assistente', [corpo]).then(function (res) {
-    if (ia !== S.ia) return;
-    var m = { r: 'm', t: (res && res.resposta) || '(sem resposta)', diag: res && res.diag }; iaPreparar(m, res || {}); ia.msgs.push(m);
-  }).catch(function (e) {
-    if (ia !== S.ia || (e && e.expirada)) return;
-    var msg = String((e && e.message) || e).replace(/^(Error|Exception): /, '');
-    if (/GEMINI_NAO_CONFIGURADO/.test(msg)) { ia.ativo = false; $('ia-off').classList.remove('hide'); }
-    else if (/tempo_esgotado/i.test(msg)) ia.erro = 'O Gemini demorou demais para responder (mais de 2 minutos). Tente de novo; se repetir, o Google deve estar sobrecarregado. Dá para fixar outro modelo na propriedade GEMINI_MODELO.';
-    else if (/Função inválida/.test(msg)) ia.erro = 'O servidor ainda não tem o Assistente. Publique uma nova versão da implantação (Gemini.gs e Code.gs atualizados).';
-    else ia.erro = msg;
-  }).then(function () { if (ia !== S.ia) return; ia.ocupado = false; iaRender(true); });
-}
-function iaAplicar(mi, g) {
-  var m = S.ia.msgs[mi]; if (!m) return;
-  if (g === 't') {
-    var st = (m.tetos || []).filter(function (t) { return t.on; });
-    if (!st.length || m.apTetos) return;
-    definirTetosLocal(st.map(function (t) { return { mes: t.mes, categoria: t.categoria, valor: t.valor }; }), 'Tetos definidos pelo assistente');
-    m.apTetos = true; iaRender(); return;
-  }
-  var sel = (m.lanc || []).filter(function (x) { return x.on; }), erro = '';
-  if (!sel.length || m.apLanc) return;
-  sel.forEach(function (x) {
-    if (erro) return;
-    var p = String(x.data || '').split('-');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(x.data || '') || !dataValida(+p[0], +p[1], +p[2])) erro = 'Data inválida em "' + x.descricao + '". Desmarque este item e lance pela tela de Lançamentos.';
-    else if (!String(x.descricao || '').trim()) erro = 'Falta a descrição de um item.';
-    else if (!(Number(x.valor) > 0)) erro = 'Valor inválido em "' + x.descricao + '".';
-    else if (!contaPorNome(x.conta)) erro = 'Escolha a conta de "' + x.descricao + '".';
-    else if (x.tipo === 'transferencia' && (!contaPorNome(x.contaDestino) || x.contaDestino === x.conta)) erro = 'Escolha duas contas diferentes (de/para) em "' + x.descricao + '".';
-  });
-  m.erroL = erro;
-  if (erro) { iaRender(); return; }
-  try {
-    transacao(function (mut) {
-      sel.forEach(function (x) {
-        var v = Math.round(Number(x.valor) * 100) / 100;
-        if (x.tipo === 'transferencia') {
-          ensureCat(mut, 'Transferências', 'Neutra');
-          var base = { data: x.data, descricao: x.descricao, categoria: 'Transferências', situacao: x.situacao, tags: 'IA', obs: '', transfId: uuid(), origem: 'manual' };
-          up(mut, Object.assign({ id: uuid() }, base, { conta: x.conta, valor: -v }));
-          up(mut, Object.assign({ id: uuid() }, base, { conta: x.contaDestino, valor: v }));
-        } else {
-          up(mut, { id: uuid(), data: x.data, descricao: x.descricao, categoria: x.categoria || '', valor: x.tipo === 'receita' ? v : -v, situacao: x.situacao,
-            conta: x.conta, tags: 'IA', obs: '', fatura: '', mesRef: '', origem: 'manual' });
-        }
-      });
-    }, sel.length + ' lançamento(s) criado(s) pelo assistente');
-    m.apLanc = true;
-  } catch (e) { m.erroL = 'Não foi possível adicionar: ' + ((e && e.message) || e); }
-  iaRender();
-}
-$('ia-enviar').onclick = function () { iaEnviar($('ia-txt').value); };
-$('ia-txt').onkeydown = function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); iaEnviar(this.value); } };
-$('ia-novo').onclick = function () { if (!S.ia.msgs.length || confirm('Apagar esta conversa?')) iaReset(); };
-$('ia-sug').onclick = function (e) { var b = e.target.closest('button[data-q]'); if (b) iaEnviar(IA_SUG[+b.dataset.q][1]); };
-$('ia-chat').onclick = function (e) {
-  if (e.target.closest('button[data-cancel]')) { // abandona a espera (a resposta, se vier, é ignorada)
-    clearInterval(iaTimer); S.ia = { msgs: S.ia.msgs, ocupado: false, ativo: S.ia.ativo, erro: 'Pergunta cancelada.' }; iaRender(true); return;
-  }
-  var b = e.target.closest('button[data-ap]'); if (b) iaAplicar(+b.dataset.m, b.dataset.ap);
-};
-$('ia-chat').onchange = function (e) {
-  var t = e.target, m = S.ia.msgs[+t.dataset.m];
-  if (!m || !t.dataset.k) return;
-  var it = (t.dataset.g === 't' ? m.tetos : m.lanc)[+t.dataset.i];
-  if (!it) return;
-  if (t.dataset.k === 'on') it.on = t.checked; else it[t.dataset.k] = t.value;
-  iaRender();
 };
 </script>
 <script>
