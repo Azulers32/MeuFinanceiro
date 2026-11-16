@@ -609,9 +609,9 @@ function renovarSessao() { // troca o dispositivo lembrado por uma sessão nova
 function expirou(m) { sairLocal('Sessão expirada. Entre novamente.'); var x = new Error(m); x.expirada = true; return Promise.reject(x); }
 function run(fn, args, depois) {
   if (S.offline) return Promise.reject(erroOffline());
-  return chamar('api', [S.token, fn, args || []], fn === 'anexarArquivo' ? 180000 : fn === 'assistente' ? 100000 : 60000).catch(function (e) {
+  return chamar('api', [S.token, fn, args || []], fn === 'anexarArquivo' ? 180000 : fn === 'assistente' ? 130000 : 60000).catch(function (e) {
     var m = (e && e.message) || String(e);
-    if (m.indexOf('SESSAO_EXPIRADA') < 0) { if (ehErroRede(e)) entrarOffline(); throw e; }
+    if (m.indexOf('SESSAO_EXPIRADA') < 0) { if (ehErroRede(e) && !(fn === 'assistente' && /tempo_esgotado/i.test(m))) entrarOffline(); throw e; } // demora do Gemini não é falta de rede
     if (!depois && lsGet(DISP_KEY)) return renovarSessao().then(function () { return run(fn, args, true); },
       function (e2) {
         if (ehErroRede(e2)) { entrarOffline(); return Promise.reject(e2); }
@@ -2902,6 +2902,7 @@ $('disp-outros').onclick = function () {
  * igual a qualquer lançamento manual (fila, planilha e botão Desfazer).
  * ====================================================================== */
 S.ia = { msgs: [], ocupado: false, ativo: null, erro: '' };
+var iaTimer;
 var IA_SUG = [
   ['Analisar meu mês', 'Analise meu mês atual: receitas, despesas, tetos e o que merece atenção. Termine com 3 sugestões práticas.'],
   ['Onde economizar?', 'Olhando os últimos meses, em quais categorias posso economizar e quanto, de forma realista?'],
@@ -3029,8 +3030,11 @@ function iaPropostas(m, mi) {
 function iaRender(rolar) {
   var box = $('ia-chat'); if (!box) return;
   var pos = box.scrollTop, h = '';
-  S.ia.msgs.forEach(function (m, i) { h += m.r === 'u' ? '<div class="ia-u">' + esc(m.t) + '</div>' : '<div class="ia-m">' + iaTexto(m.t) + iaPropostas(m, i) + '</div>'; });
-  if (S.ia.ocupado) h += '<div class="ia-m mut">Pensando…</div>';
+  S.ia.msgs.forEach(function (m, i) {
+    h += m.r === 'u' ? '<div class="ia-u">' + esc(m.t) + '</div>'
+      : '<div class="ia-m">' + iaTexto(m.t) + iaPropostas(m, i) + (m.diag ? '<div class="mut" style="font-size:11px;margin:4px 0">' + esc(m.diag.modelo || '') + ' · ' + (m.diag.ms / 1000).toFixed(1).replace('.', ',') + ' s</div>' : '') + '</div>';
+  });
+  if (S.ia.ocupado) h += '<div class="ia-m mut">Pensando… <span id="ia-seg">' + Math.round((Date.now() - (S.ia.t0 || Date.now())) / 1000) + ' s</span> <button class="btn" data-cancel="1" style="margin-left:8px;padding:2px 10px;min-height:0">Cancelar</button></div>';
   if (S.ia.erro) h += '<div class="msg neg" style="margin:0">' + esc(S.ia.erro) + '</div>';
   box.innerHTML = h;
   box.scrollTop = rolar ? box.scrollHeight : pos;
@@ -3058,17 +3062,20 @@ function iaHistorico() { // texto que o Gemini vê de cada mensagem (inclui o qu
 function iaEnviar(txt) {
   var ia = S.ia; txt = String(txt || '').trim();
   if (!txt || ia.ocupado || ia.ativo === false) return;
-  ia.msgs.push({ r: 'u', t: txt.slice(0, 2000) }); ia.ocupado = true; ia.erro = ''; $('ia-txt').value = ''; iaRender(true);
+  ia.msgs.push({ r: 'u', t: txt.slice(0, 2000) }); ia.ocupado = true; ia.erro = ''; ia.t0 = Date.now(); $('ia-txt').value = ''; iaRender(true);
+  clearInterval(iaTimer);
+  iaTimer = setInterval(function () { var e = $('ia-seg'); if (e && S.ia === ia && ia.ocupado) e.textContent = Math.round((Date.now() - ia.t0) / 1000) + ' s'; else clearInterval(iaTimer); }, 1000);
   var corpo;
   try { corpo = { mensagens: iaHistorico(), contexto: iaContexto(), hoje: hojeISO() }; }
   catch (e) { ia.ocupado = false; ia.erro = 'Não consegui montar o resumo dos dados: ' + ((e && e.message) || e); iaRender(true); return; }
   run('assistente', [corpo]).then(function (res) {
     if (ia !== S.ia) return;
-    var m = { r: 'm', t: (res && res.resposta) || '(sem resposta)' }; iaPreparar(m, res || {}); ia.msgs.push(m);
+    var m = { r: 'm', t: (res && res.resposta) || '(sem resposta)', diag: res && res.diag }; iaPreparar(m, res || {}); ia.msgs.push(m);
   }).catch(function (e) {
     if (ia !== S.ia || (e && e.expirada)) return;
     var msg = String((e && e.message) || e).replace(/^(Error|Exception): /, '');
     if (/GEMINI_NAO_CONFIGURADO/.test(msg)) { ia.ativo = false; $('ia-off').classList.remove('hide'); }
+    else if (/tempo_esgotado/i.test(msg)) ia.erro = 'O Gemini demorou demais para responder (mais de 2 minutos). Tente de novo; se repetir, o Google deve estar sobrecarregado. Dá para fixar outro modelo na propriedade GEMINI_MODELO.';
     else if (/Função inválida/.test(msg)) ia.erro = 'O servidor ainda não tem o Assistente. Publique uma nova versão da implantação (Gemini.gs e Code.gs atualizados).';
     else ia.erro = msg;
   }).then(function () { if (ia !== S.ia) return; ia.ocupado = false; iaRender(true); });
@@ -3117,7 +3124,12 @@ $('ia-enviar').onclick = function () { iaEnviar($('ia-txt').value); };
 $('ia-txt').onkeydown = function (e) { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); iaEnviar(this.value); } };
 $('ia-novo').onclick = function () { if (!S.ia.msgs.length || confirm('Apagar esta conversa?')) iaReset(); };
 $('ia-sug').onclick = function (e) { var b = e.target.closest('button[data-q]'); if (b) iaEnviar(IA_SUG[+b.dataset.q][1]); };
-$('ia-chat').onclick = function (e) { var b = e.target.closest('button[data-ap]'); if (b) iaAplicar(+b.dataset.m, b.dataset.ap); };
+$('ia-chat').onclick = function (e) {
+  if (e.target.closest('button[data-cancel]')) { // abandona a espera (a resposta, se vier, é ignorada)
+    clearInterval(iaTimer); S.ia = { msgs: S.ia.msgs, ocupado: false, ativo: S.ia.ativo, erro: 'Pergunta cancelada.' }; iaRender(true); return;
+  }
+  var b = e.target.closest('button[data-ap]'); if (b) iaAplicar(+b.dataset.m, b.dataset.ap);
+};
 $('ia-chat').onchange = function (e) {
   var t = e.target, m = S.ia.msgs[+t.dataset.m];
   if (!m || !t.dataset.k) return;
